@@ -4,15 +4,16 @@ import os
 import singlestoredb as s2
 from services.stock_service import StockService
 from utils.data_utils import format_currency, format_percentage, calculate_portfolio_metrics
+from env import host, port, user, password, database
 
 def get_optimized_positions():
     """Fetch optimized portfolio positions from SingleStore."""
     config = {
-        "host": "svc-216a63c3-a592-4e41-94dd-3161c3979c7f-dml.aws-virginia-5.svc.singlestore.com",
-        "port": 3306,
-        "user": 'admin',
-        "password": "xcg1PdlNL5TV9VHZaBRKPLXFCGamldta",
-        "database": "fin_advisor_agent"
+        "host": host,
+        "port": port,
+        "user": user,
+        "password": password,
+        "database": database
     }
     connection = s2.connect(**config)
     cursor = connection.cursor()
