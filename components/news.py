@@ -8,9 +8,12 @@ def display_news_dashboard():
     ai_service = AIService()
     
     # Search bar
+    from services.tracking_service import TrackingService
+    
     search_query = st.text_input("Search News", placeholder="Enter keywords or stock symbols")
     
     if search_query:
+        TrackingService.log_activity("news_search", {"query": search_query})
         news_articles = news_service.search_news(search_query)
     else:
         news_articles = news_service.get_market_news()
