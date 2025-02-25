@@ -2,6 +2,7 @@ import streamlit as st
 import os
 import singlestoredb as s2
 from datetime import datetime
+import json
 
 class TrackingService:
     @staticmethod
@@ -35,7 +36,7 @@ class TrackingService:
         # Insert activity
         cursor.execute(
             "INSERT INTO user_activities (user_id, activity_type, details, timestamp) VALUES (%s, %s, %s, %s)",
-            (user_id, activity_type, str(details), datetime.now())
+            (user_id, activity_type, json.dumps(details), datetime.now())
         )
         
         connection.commit()
