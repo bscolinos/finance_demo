@@ -1,0 +1,12 @@
+streamlit
+yfinance
+newsapi-python
+plotly
+openai
+singlestoredb
+python-dotenv
+tenacity
+pandas
+anthropic
+streamlit-autorefresh
+sqlalchemy

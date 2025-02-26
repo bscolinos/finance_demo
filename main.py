@@ -5,15 +5,27 @@ from components import portfolio, news, charts
 from services.stock_service import StockService
 from services.news_service import NewsService
 from services.ai_service import AIService
-
 from dotenv import load_dotenv
+import pandas as pd
+import plotly.express as px
+import multiprocessing
+from streamlit_autorefresh import st_autorefresh
 
 load_dotenv()
 
-st.set_page_config(page_title="AI Financial Advisor",
-                   page_icon="📈",
-                   layout="wide",
-                   initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="AI Financial Advisor",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Import database initialization and repository for live_trades table
+from database.database import init_db
+from database.repository import TradeRepository
+
+# Import the trade simulator module (runs the simulation process)
+import tradeSimulator.simulator as simulator
 
 
 def insert_optimized_portfolio(optimized_portfolio_data: dict, user_id: str):
@@ -43,8 +55,7 @@ def insert_optimized_portfolio(optimized_portfolio_data: dict, user_id: str):
     """)
 
     # Clear previous optimizations for this user
-    cursor.execute("DELETE FROM optimized_portfolio WHERE user_id = %s",
-                   (user_id, ))
+    cursor.execute("DELETE FROM optimized_portfolio WHERE user_id = %s", (user_id, ))
 
     insert_query = '''
     INSERT INTO optimized_portfolio (user_id, symbol, quantity, target_allocation)
@@ -52,8 +63,7 @@ def insert_optimized_portfolio(optimized_portfolio_data: dict, user_id: str):
     '''
 
     for holding in optimized_portfolio_data.get("optimized_holdings", []):
-        data_tuple = (user_id, holding["symbol"], holding["quantity"],
-                      holding["target_allocation"])
+        data_tuple = (user_id, holding["symbol"], holding["quantity"], holding["target_allocation"])
         cursor.execute(insert_query, data_tuple)
 
     connection.commit()
@@ -64,17 +74,24 @@ def insert_optimized_portfolio(optimized_portfolio_data: dict, user_id: str):
 def main():
     st.title("AI Financial Advisor 📈")
 
-    # Initialize services
-    stock_service = StockService()
-    ai_service = AIService()
+    # Initialize the live_trades table using your database module
+    init_db()
 
-    # Sidebar navigation with the new Welcome page
+    # Start the trade simulator process in the background (runs only once per session)
+    if "simulation_started" not in st.session_state:
+        sim_process = multiprocessing.Process(target=simulator.main, daemon=True)
+        sim_process.start()
+        st.session_state.simulation_started = True
+        st.sidebar.info("Trade simulator started in background.")
+
+    # Sidebar navigation with an added Real-Time Trading View option
     st.sidebar.title("Navigation")
     page = st.sidebar.radio(
         "Select a page",
-        ["Welcome", "Portfolio Dashboard", "News Tracker", "AI Insights"])
+        ["Welcome", "Portfolio Dashboard", "News Tracker", "AI Insights", "Real-Time Trading View"]
+    )
 
-    # Initialize session state for user_id
+    # Initialize session state for user_id if not already set
     if 'user_id' not in st.session_state:
         st.session_state.user_id = ''
 
@@ -108,23 +125,18 @@ def main():
                     'quantity': 8,
                     'value': 2800.00
                 }],
-                'total_value':
-                7800.00,
-                'daily_change':
-                120.50
+                'total_value': 7800.00,
+                'daily_change': 120.50
             }
             # Get optimized portfolio from the LLM based on the user's goals
-            optimized_portfolio = ai_service.optimize_portfolio(
-                sample_portfolio, user_goals)
+            ai_service = AIService()
+            optimized_portfolio = ai_service.optimize_portfolio(sample_portfolio, user_goals)
             st.subheader("Optimized Portfolio")
             st.json(optimized_portfolio)
 
             # Insert the optimized positions into SingleStore with user_id
-            insert_optimized_portfolio(optimized_portfolio,
-                                       st.session_state.user_id)
-            st.success(
-                "Optimized portfolio positions have been saved into the database!"
-            )
+            insert_optimized_portfolio(optimized_portfolio, st.session_state.user_id)
+            st.success("Optimized portfolio positions have been saved into the database!")
 
     elif page == "Portfolio Dashboard":
         col1, col2 = st.columns([2, 1])
@@ -142,7 +154,7 @@ def main():
     elif page == "News Tracker":
         news.display_news_dashboard()
 
-    else:  # AI Insights
+    elif page == "AI Insights":
         st.subheader("AI-Powered Insights")
         sample_portfolio = {
             'holdings': [{
@@ -158,13 +170,11 @@ def main():
                 'quantity': 8,
                 'value': 2800.00
             }],
-            'total_value':
-            7800.00,
-            'daily_change':
-            120.50
+            'total_value': 7800.00,
+            'daily_change': 120.50
         }
-        portfolio_analysis = ai_service.get_portfolio_insights(
-            sample_portfolio)
+        ai_service = AIService()
+        portfolio_analysis = ai_service.get_portfolio_insights(sample_portfolio)
         st.write(portfolio_analysis)
 
         news_service = NewsService()
@@ -172,6 +182,50 @@ def main():
         sentiment = ai_service.get_market_sentiment(market_news)
         st.subheader("Market Sentiment Analysis")
         st.write(sentiment)
+
+    elif page == "Real-Time Trading View":
+        st.header("Real-Time Trading View")
+        st.write("Live trades and price chart updated every 500 ms.")
+
+        # Auto-refresh the page every 500 ms using streamlit-autorefresh
+        st_autorefresh(interval=500, key="trades_autorefresh")
+
+        # Query the latest trades using your TradeRepository
+        repo = TradeRepository()
+        try:
+            trades_df = repo.get_latest_trades(limit=50)
+        except Exception as e:
+            st.error(f"Error retrieving trades: {e}")
+            trades_df = None
+
+        if trades_df is not None and not trades_df.empty:
+            # Debug: display the first few rows of the raw data
+            st.write("Raw trade data (first 5 rows):", trades_df.head())
+
+            # Convert the nanosecond timestamp to a datetime for proper plotting
+            try:
+                trades_df['datetime'] = pd.to_datetime(
+                    trades_df['participant_timestamp'], unit='ns', errors='coerce'
+                )
+            except Exception as e:
+                st.error(f"Error converting timestamps: {e}")
+
+            # Ensure the 'price' column is numeric (in case it comes as a string)
+            trades_df['price'] = pd.to_numeric(trades_df['price'], errors='coerce')
+
+            st.subheader("Latest Trades")
+            st.dataframe(trades_df.sort_values("participant_timestamp", ascending=False))
+
+            st.subheader("Price Over Time")
+            fig = px.line(
+                trades_df.sort_values("datetime"),
+                x="datetime",
+                y="price",
+                title="Trade Price Trend"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No trade data available yet.")
 
 
 if __name__ == "__main__":
